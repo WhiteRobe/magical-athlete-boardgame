@@ -4,7 +4,7 @@ import {
 } from 'three';
 import type { CharId } from '../../shared/types';
 import { PAL } from '../art/palette';
-import { toon, outlineMat } from './fx';
+import { toon, outlineMat, seatOutlineMats } from './fx';
 
 // 程序化低多边形棋子：基础几何体拼装，卡通着色 + 描边。单位：棋子约 0.9 高，底部 y=0，面朝 +z。
 
@@ -560,4 +560,29 @@ export function buildPiece(id: CharId): Group {
   BUILD[id](b, { b: p.body, a: p.accent });
   b.g.userData.char = id;
   return b.g;
+}
+
+/**
+ * 把棋子的外轮廓换成玩家色并加一层柔和外发光。
+ * 只处理较大的部件（身体/头/四肢），眼睛等小部件保留深色描边以免五官糊掉，也省掉大量发光壳的绘制。
+ */
+export function tintPieceOutline(g: Group, seatColor: string) {
+  const { line, glow } = seatOutlineMats(seatColor);
+  const targets: Mesh[] = [];
+  g.traverse((o) => {
+    const m = o as Mesh;
+    if (!m.isMesh || !m.userData.outline) return;
+    const host = m.parent as Mesh;
+    const geom = m.geometry;
+    if (!geom.boundingSphere) geom.computeBoundingSphere();
+    const s = host.scale;
+    if (geom.boundingSphere!.radius * Math.max(s.x, s.y, s.z) >= 0.07) targets.push(m);
+  });
+  for (const m of targets) {
+    m.material = line;
+    const gl = new Mesh(m.geometry, glow);
+    gl.userData.outline = true;
+    gl.renderOrder = 1;
+    m.parent!.add(gl);
+  }
 }

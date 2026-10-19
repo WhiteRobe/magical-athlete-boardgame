@@ -9,7 +9,7 @@ import { CHARS } from '../../shared/characters';
 import type { BoardApi } from '../game/board';
 import { applyVisual } from '../game/describe';
 import { effectivePower, noteText, predictionValid } from '../game/powers';
-import { buildPiece } from './pieces';
+import { buildPiece, tintPieceOutline } from './pieces';
 import { buildTrack, spaceCenter, TILE_TOP, type TrackMeshes } from './track';
 import { createDiceTray } from './diceTray';
 import { anim, ease, lerp, tick, wait, flushTweens, toon, outlineMat } from './fx';
@@ -168,6 +168,7 @@ export function createBoard3D(container: HTMLElement): BoardApi {
       const root = new Group();
       const body = new Group();
       const model = buildPiece(r.card);
+      tintPieceOutline(model, SEAT_COLORS[r.seat % 6]);
       model.scale.setScalar(1.9);
       const tilt = new Group();
       tilt.add(model);

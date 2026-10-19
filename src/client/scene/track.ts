@@ -1,7 +1,7 @@
 import {
   Group, Mesh, CylinderGeometry, Shape, ExtrudeGeometry, ConeGeometry, DodecahedronGeometry, PlaneGeometry, CircleGeometry,
   CanvasTexture, MeshBasicMaterial, OctahedronGeometry, CapsuleGeometry, Vector3, SRGBColorSpace, IcosahedronGeometry, BoxGeometry, SphereGeometry, TorusGeometry,
-  CatmullRomCurve3, QuadraticBezierCurve3, TubeGeometry, RepeatWrapping, MeshToonMaterial, Color, type BufferGeometry, type Object3D,
+  CatmullRomCurve3, QuadraticBezierCurve3, TubeGeometry, RepeatWrapping, AdditiveBlending, MeshToonMaterial, Color, type BufferGeometry, type Object3D,
 } from 'three';
 import type { Spaces, TrackId } from '../../shared/types';
 import { FINISH } from '../../shared/types';
@@ -94,15 +94,13 @@ function starShape(r: number) {
   return s;
 }
 
+/** 箭头轮廓（指向 +y，单位：世界坐标），浮雕几何与流光遮罩共用 */
+const ARROW_PTS: [number, number][] = [
+  [0, 0.31], [0.27, 0.03], [0.12, 0.03], [0.12, -0.25], [0, -0.17], [-0.12, -0.25], [-0.12, 0.03], [-0.27, 0.03],
+];
 function arrowShape() {
   const s = new Shape();
-  s.moveTo(0, 0.3);
-  s.lineTo(0.26, 0.02);
-  s.lineTo(0.1, 0.02);
-  s.lineTo(0.1, -0.28);
-  s.lineTo(-0.1, -0.28);
-  s.lineTo(-0.1, 0.02);
-  s.lineTo(-0.26, 0.02);
+  ARROW_PTS.forEach(([x, y], k) => (k ? s.lineTo(x, y) : s.moveTo(x, y)));
   s.closePath();
   return s;
 }
@@ -192,11 +190,12 @@ export interface TrackMeshes {
   revealNow(): void;
 }
 
-/** 从 i 到 i±1 的 xz 方向角（用于箭头朝向） */
+/** 第 i 格沿赛道前进（delta>0）/ 后退（delta<0）的 xz 方向角：取前后相邻格的中心差，U 形弯道处也顺滑 */
 function dirAngle(i: number, delta: number) {
-  const a = spaceCenter(Math.max(0, Math.min(29, i)));
-  const b = spaceCenter(Math.max(0, Math.min(FINISH, i + Math.sign(delta))));
-  return Math.atan2(b.x - a.x, b.z - a.z);
+  const a = spaceCenter(Math.max(0, i - 1));
+  const b = spaceCenter(Math.min(FINISH, i + 1));
+  const s = Math.sign(delta);
+  return Math.atan2((b.x - a.x) * s, (b.z - a.z) * s);
 }
 
 export function buildTrack(track: TrackId, spaces: Spaces): TrackMeshes {
@@ -310,8 +309,35 @@ export function buildTrack(track: TrackId, spaces: Spaces): TrackMeshes {
   const plane = new PlaneGeometry(0.74, 0.74);
   const starGeo = new ExtrudeGeometry(starShape(0.2), { depth: 0.07, bevelEnabled: true, bevelSize: 0.02, bevelThickness: 0.02, bevelSegments: 1 });
   starGeo.center();
-  const arrowGeo = new ExtrudeGeometry(arrowShape(), { depth: 0.07, bevelEnabled: true, bevelSize: 0.015, bevelThickness: 0.015, bevelSegments: 1 });
-  arrowGeo.center();
+  // 箭头格：平贴的浮雕箭头 + 沿箭头方向滑过的流光（alphaMap 限定在箭头面内）
+  const arrowGeo = new ExtrudeGeometry(arrowShape(), { depth: 0.014, bevelEnabled: true, bevelSize: 0.012, bevelThickness: 0.01, bevelSegments: 2 });
+  const arrowMask = canvasTex(128, 128, (x) => {
+    const k = 128 / 0.74;
+    x.fillStyle = '#ffffff';
+    x.beginPath();
+    for (const [px, py] of ARROW_PTS) x.lineTo(64 + px * 0.86 * k, 64 - py * 0.86 * k);
+    x.closePath();
+    x.fill();
+  });
+  const shineTex = canvasTex(4, 64, (x) => {
+    const gr = x.createLinearGradient(0, 0, 0, 64);
+    gr.addColorStop(0, '#000');
+    gr.addColorStop(0.42, '#000');
+    gr.addColorStop(0.5, '#fff');
+    gr.addColorStop(0.62, '#000');
+    gr.addColorStop(1, '#000');
+    x.fillStyle = gr;
+    x.fillRect(0, 0, 4, 64);
+  });
+  shineTex.wrapT = RepeatWrapping;
+  shineTex.repeat.y = 0.55;
+  const shineMat = (c: string) =>
+    new MeshBasicMaterial({ map: shineTex, alphaMap: arrowMask, color: c, transparent: true, depthWrite: false, blending: AdditiveBlending });
+  const arrowLook = {
+    fwd: { body: toon('#2fcf7f', { emissive: '#0c5a33' }), shine: shineMat('#d6ffe9'), text: '#ffffff' },
+    back: { body: toon('#ff6a3d', { emissive: '#6e1c08' }), shine: shineMat('#ffe0b8'), text: '#ffffff' },
+  };
+  updaters.push((t) => (shineTex.offset.y = -((t / 1300) % 1)));
   const peelGeo = new SphereGeometry(0.09, 7, 5);
 
   const portalColors = ['#a66cff', '#4cc9f0', '#ff5df0'];
@@ -376,19 +402,15 @@ export function buildTrack(track: TrackId, spaces: Spaces): TrackMeshes {
       x.beginPath(); x.moveTo(64, 12); x.lineTo(118, 110); x.lineTo(10, 110); x.closePath(); x.fill(); x.stroke();
       x.fillStyle = '#ffd23f'; x.beginPath(); x.moveTo(64, 36); x.lineTo(98, 98); x.lineTo(30, 98); x.closePath(); x.fill();
     } });
-    else if (fx?.kind === 'arrow') tex = label(String(Math.abs(fx.delta)), { size: 44, icon: (x) => {
-      x.fillStyle = fx.delta > 0 ? '#3ddc97' : '#ff5d3d'; x.strokeStyle = INK; x.lineWidth = 7; x.lineJoin = 'round';
-      x.beginPath(); x.moveTo(64, 8); x.lineTo(118, 64); x.lineTo(88, 64); x.lineTo(88, 120); x.lineTo(40, 120); x.lineTo(40, 64); x.lineTo(10, 64); x.closePath();
-      x.fill(); x.stroke();
-    } });
+    else if (fx?.kind === 'arrow') tex = label(fx.delta > 0 ? `+${fx.delta}` : `\u2212${-fx.delta}`, { size: 50, color: '#ffffff', stroke: INK });
     else if (fx?.kind === 'portal') tex = label(`→${fx.to}`, { size: 34, color: '#ffffff' });
     else if (i === 0) tex = label('起点', { color: INK, stroke: '#ffffff', size: 40 });
     else tex = label(String(i), { color: i % 5 === 0 ? '#ff7a2f' : '#ffffff', size: i % 5 === 0 ? 58 : 48 });
     const decal = new Mesh(plane, new MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
     decal.rotation.x = -Math.PI / 2;
-    if (fx?.kind === 'arrow') decal.rotation.z = dirAngle(i, fx.delta) + Math.PI;
-    else textDecals.push(decal);
-    decal.position.y = 0.215;
+    textDecals.push(decal);
+    decal.position.y = fx?.kind === 'arrow' ? 0.252 : 0.215;
+    if (fx?.kind === 'arrow') decal.renderOrder = 2;
     holder.add(decal);
 
     // 机关格子的立体标记（放进 parts，随机赛道开场时再揭晓）
@@ -419,17 +441,24 @@ export function buildTrack(track: TrackId, spaces: Spaces): TrackMeshes {
       peel.position.set(0.33, 0.24, 0.18);
       parts.add(peel);
     } else if (fx?.kind === 'arrow') {
-      const ar = outlined(new Mesh(arrowGeo, toon(fx.delta > 0 ? '#3ddc97' : '#ff5d3d')));
-      const dir = dirAngle(i, fx.delta);
+      const look = fx.delta > 0 ? arrowLook.fwd : arrowLook.back;
+      // pivot 局部：+y = 箭头指向，+z = 竖直向上
       const pivot = new Group();
-      pivot.rotation.y = dir + Math.PI;
-      pivot.add(ar);
-      pivot.position.set(0, 0.62, 0);
+      pivot.rotation.set(-Math.PI / 2, 0, dirAngle(i, fx.delta) + Math.PI);
+      pivot.position.y = 0.205;
+      const breathe = new Group();
+      pivot.add(breathe);
+      breathe.add(outlined(new Mesh(arrowGeo, look.body)));
+      const shine = new Mesh(plane, look.shine);
+      shine.position.z = 0.035;
+      shine.renderOrder = 1;
+      breathe.add(shine);
       parts.add(pivot);
-      ar.rotation.x = -Math.PI / 2 + 0.9;
       updaters.push((t) => {
-        const k = (t / 700 + i * 0.3) % 1;
-        ar.position.z = -0.12 + k * 0.24;
+        // 轻微向箭头方向「呼吸」
+        const k = Math.sin(t / 420 + i * 0.7);
+        breathe.position.y = 0.025 * k;
+        breathe.scale.setScalar(1 + 0.025 * k);
       });
     } else if (fx?.kind === 'portal') {
       const pc = portalColors[portalNo++ % portalColors.length];

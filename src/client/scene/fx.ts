@@ -1,4 +1,4 @@
-import { Color, DataTexture, RedFormat, NearestFilter, ShaderMaterial, BackSide, MeshToonMaterial, type Texture } from 'three';
+import { Color, DataTexture, RedFormat, NearestFilter, ShaderMaterial, BackSide, MeshToonMaterial, AdditiveBlending, type Texture } from 'three';
 
 // ---------- 补间 ----------
 type Job = { t0: number; dur: number; fn: (k: number) => void; done: () => void };
@@ -84,3 +84,32 @@ void main(){ vec3 p = position + normal * thickness; gl_Position = projectionMat
   fragmentShader: `uniform vec3 color; void main(){ gl_FragColor = vec4(color,1.0); }`,
   side: BackSide,
 });
+
+/** 玩家色描边：亮化的玩家色实线 + 更宽的半透明加法外发光壳（边缘渐隐）。按颜色缓存，所有棋子共享。 */
+const seatOutlineCache = new Map<string, { line: ShaderMaterial; glow: ShaderMaterial }>();
+export function seatOutlineMats(hex: string) {
+  let m = seatOutlineCache.get(hex);
+  if (m) return m;
+  const base = new Color(hex);
+  const line = outlineMat.clone();
+  line.uniforms.thickness.value = 0.02;
+  line.uniforms.color.value = base.clone().lerp(new Color('#ffffff'), 0.18);
+  const glow = new ShaderMaterial({
+    uniforms: { thickness: { value: 0.05 }, color: { value: base.clone().lerp(new Color('#ffffff'), 0.35) }, opacity: { value: 0.55 } },
+    vertexShader: `uniform float thickness; varying float vF;
+void main(){
+  vec4 mv = modelViewMatrix * vec4(position + normal * thickness, 1.0);
+  vec3 n = normalize(normalMatrix * normal);
+  vF = abs(dot(n, normalize(-mv.xyz)));
+  gl_Position = projectionMatrix * mv;
+}`,
+    fragmentShader: `uniform vec3 color; uniform float opacity; varying float vF;
+void main(){ gl_FragColor = vec4(color * opacity * vF * vF, 1.0); }`,
+    side: BackSide,
+    transparent: true,
+    depthWrite: false,
+    blending: AdditiveBlending,
+  });
+  seatOutlineCache.set(hex, (m = { line, glow }));
+  return m;
+}
