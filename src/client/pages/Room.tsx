@@ -37,7 +37,8 @@ export function Room({ id }: { id: string }) {
           emotes.value = [...emotes.value, x];
           setTimeout(() => (emotes.value = emotes.value.filter((y) => y.id !== x.id)), 2500);
         } else if (m.type === 'error') {
-          toast(m.msg);
+          // 断线期间排队的操作在重连后可能已过期，服务端会随后发全量同步，不必打扰玩家
+          if (m.msg !== '操作已过期') toast(m.msg);
         }
       },
       (st) => (status.value = st),
