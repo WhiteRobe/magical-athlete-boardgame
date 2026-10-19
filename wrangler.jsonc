@@ -1,0 +1,43 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "magical-athlete",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-09-20",
+
+  // 前端 SPA：只有 /api 与 /ws 进 Worker，其余直接走免费静态资源
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/ws/*"]
+  },
+
+  "durable_objects": {
+    "bindings": [
+      { "name": "LOBBY", "class_name": "LobbyDO" },
+      { "name": "ROOM", "class_name": "RoomDO" }
+    ]
+  },
+  // 免费计划必须是 SQLite 后端
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LobbyDO", "RoomDO"] }],
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "magical-athlete-db",
+      "database_id": "<YOUR_D1_DATABASE_ID>",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "vars": {
+    "PBKDF2_ITERATIONS": "20000",
+    "TURN_TIMEOUT_MS": "45000",
+    "OFFLINE_TAKEOVER_MS": "30000"
+  },
+
+  "observability": { "enabled": true }
+  // 自定义域名（可选）：
+  // "routes": [{ "pattern": "game.example.com", "custom_domain": true }]
+  // 密钥：wrangler secret put SESSION_SECRET；本地写 .dev.vars
+}
